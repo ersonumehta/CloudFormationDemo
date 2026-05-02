@@ -1,0 +1,303 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation Template for EC2 Instance with VPC, Security Groups, ALB, and Route53'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: Dev
+    Description: Environment name prefix
+
+  ServiceName:
+    Type: String
+    Default: UserSetting
+    Description: Service name for the application
+
+  EnvIdentifier:
+    Type: String
+    Default: q1w
+    Description: Environment identifier
+
+  CustomAMIId:
+    Type: String
+    Description: Custom AMI ID from your Spring Boot Gradle build (leave blank to use latest Amazon Linux 2)
+    Default: ''
+
+Conditions:
+  UseCustomAMI: !Not [!Equals [!Ref CustomAMIId, '']]
+
+Resources:
+  # VPC Configuration
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC'
+
+  # Public Subnet
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2'
+
+  # Private Subnet for EC2
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1'
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-IGW'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicRT'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private Route Table
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateRT'
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Security Group for ALB
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG'
+
+  # Security Group for EC2
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 instance
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: HTTP from ALB
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG'
+
+  # EC2 Instance
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !If
+        - UseCustomAMI
+        - !Ref CustomAMIId
+        - !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+      InstanceType: t3.micro
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          
+          # Update system packages
+          yum update -y
+          
+          # Install Docker
+          amazon-linux-extras install docker -y
+          systemctl start docker
+          systemctl enable docker
+          
+          # Pull the latest Spring Boot image from ECR Public
+          docker pull public.ecr.aws/a9m5d1a5/skumar:latest
+          
+          # Run the Spring Boot application container
+          # Assuming your app runs on port 8080, mapping to host port 80
+          docker run -d --name springboot-app -p 80:8080 public.ecr.aws/a9m5d1a5/skumar:latest
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-Instance'
+
+  # Application Load Balancer
+  MyALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
+
+  # Target Group for ALB
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-TG'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref MyVPC
+      TargetType: instance
+      Targets:
+        - Id: !Ref MyEC2Instance
+          Port: 80
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-TG'
+
+  # ALB Listener
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MyALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref MyVPC
+    Export:
+      Name: !Sub '${EnvironmentName}-VPC-ID'
+
+  EC2InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref MyEC2Instance
+    Export:
+      Name: !Sub '${EnvironmentName}-EC2-InstanceID'
+
+  EC2PrivateIP:
+    Description: EC2 Private IP Address
+    Value: !GetAtt MyEC2Instance.PrivateIp
+    Export:
+      Name: !Sub '${EnvironmentName}-EC2-PrivateIP'
+
+  ALBDNSName:
+    Description: DNS name of the Load Balancer
+    Value: !GetAtt MyALB.DNSName
+    Export:
+      Name: !Sub '${EnvironmentName}-ALB-DNSName'
+
+
+  SecurityGroupEC2:
+    Description: EC2 Security Group ID
+    Value: !Ref EC2SecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-EC2-SG'
+
+  SecurityGroupALB:
+    Description: ALB Security Group ID
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-ALB-SG'
