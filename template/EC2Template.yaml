@@ -241,24 +241,13 @@ Resources:
         Fn::Base64: |
           #!/bin/bash
           set -e
-          
-          # Update system packages
           sudo yum update -y
-          
-          # Install Docker
           sudo amazon-linux-extras install docker -y
           sudo systemctl start docker
           sudo systemctl enable docker
-          
-          # Add ec2-user to docker group
           sudo usermod -aG docker ec2-user
-          
-          # Pull the latest Spring Boot image from ECR Public
-          docker pull public.ecr.aws/a9m5d1a5/skumar:latest
-          
-          # Run the Spring Boot application container
-          # Assuming your app runs on port 8080, mapping to host port 80
-          docker run -d --name springboot-app -p 80:8080 public.ecr.aws/a9m5d1a5/skumar:latest
+          sudo docker pull public.ecr.aws/a9m5d1a5/skumar:latest
+          sudo docker run -d --name springboot-app -p 80:8080 public.ecr.aws/a9m5d1a5/skumar:latest
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-Instance'
