@@ -85,6 +85,26 @@ Resources:
       VpcId: !Ref MyVPC
       InternetGatewayId: !Ref InternetGateway
 
+  # Elastic IP for NAT Gateway
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-NAT-EIP'
+
+  # NAT Gateway in Public Subnet
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-NAT'
+
   # Public Route Table
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
@@ -123,6 +143,15 @@ Resources:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateRT'
 
+  # Route from Private Subnet to NAT Gateway
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NATGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
   PrivateSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -148,6 +177,25 @@ Resources:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG'
 
+  # Security Group for EC2 Instance Connect Endpoint
+  EC2InstanceConnectSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 Instance Connect Endpoint
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for EC2 Instance Connect
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG'
+
   # Security Group for EC2
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -158,8 +206,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
-          Description: SSH access
+          SourceSecurityGroupId: !Ref EC2InstanceConnectSG
+          Description: SSH from EC2 Instance Connect Endpoint
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
@@ -263,6 +311,17 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref MyTargetGroup
 
+  # EC2 Instance Connect Endpoint
+  EC2InstanceConnectEndpoint:
+    Type: AWS::EC2::InstanceConnectEndpoint
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref EC2InstanceConnectSG
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE'
+
 
 Outputs:
   VPCId:
@@ -301,3 +360,28 @@ Outputs:
     Value: !Ref ALBSecurityGroup
     Export:
       Name: !Sub '${EnvironmentName}-ALB-SG'
+
+  NATGatewayEIP:
+    Description: Elastic IP address of NAT Gateway
+    Value: !Ref NATGatewayEIP
+    Export:
+      Name: !Sub '${EnvironmentName}-NAT-EIP'
+
+  NATGatewayId:
+    Description: NAT Gateway ID
+    Value: !Ref NATGateway
+    Export:
+      Name: !Sub '${EnvironmentName}-NAT-ID'
+
+  EC2InstanceConnectEndpointId:
+    Description: EC2 Instance Connect Endpoint ID
+    Value: !Ref EC2InstanceConnectEndpoint
+    Export:
+      Name: !Sub '${EnvironmentName}-EICE-ID'
+
+  EC2InstanceConnectSGId:
+    Description: Security Group ID for EC2 Instance Connect Endpoint
+    Value: !Ref EC2InstanceConnectSG
+    Export:
+      Name: !Sub '${EnvironmentName}-EICE-SG'
+
