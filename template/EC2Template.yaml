@@ -243,12 +243,15 @@ Resources:
           set -e
           
           # Update system packages
-          yum update -y
+          sudo yum update -y
           
           # Install Docker
-          amazon-linux-extras install docker -y
-          systemctl start docker
-          systemctl enable docker
+          sudo amazon-linux-extras install docker -y
+          sudo systemctl start docker
+          sudo systemctl enable docker
+          
+          # Add ec2-user to docker group
+          sudo usermod -aG docker ec2-user
           
           # Pull the latest Spring Boot image from ECR Public
           docker pull public.ecr.aws/a9m5d1a5/skumar:latest
@@ -384,4 +387,3 @@ Outputs:
     Value: !Ref EC2InstanceConnectSG
     Export:
       Name: !Sub '${EnvironmentName}-EICE-SG'
-
