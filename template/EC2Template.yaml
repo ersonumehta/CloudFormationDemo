@@ -243,26 +243,26 @@ Resources:
           set -e
           
           # Update system packages
-          sudo yum update -y
+          yum update -y
           
           # Install Docker
-          sudo amazon-linux-extras install docker -y
-          sudo systemctl start docker
-          sudo systemctl enable docker
+          amazon-linux-extras install docker -y
+          systemctl start docker
+          systemctl enable docker
           
           # Add ec2-user to docker group
-          sudo usermod -aG docker ec2-user
+          usermod -aG docker ec2-user
           
           # Stop and remove existing container if it exists
-          sudo docker stop springboot-app 2>/dev/null || true
-          sudo docker rm springboot-app 2>/dev/null || true
+          docker stop springboot-app 2>/dev/null || true
+          docker rm springboot-app 2>/dev/null || true
           
           # Pull the latest Spring Boot image from ECR Public
-          sudo docker pull public.ecr.aws/a9m5d1a5/skumar:latest
+          docker pull public.ecr.aws/a9m5d1a5/skumar:latest
           
           # Run the Spring Boot application container
           # Assuming your app runs on port 8080, mapping to host port 80
-          sudo docker run -d --name springboot-app -p 80:8080 public.ecr.aws/a9m5d1a5/skumar:latest
+          docker run -d --name springboot-app -p 80:8080 public.ecr.aws/a9m5d1a5/skumar:latest
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-Instance'
