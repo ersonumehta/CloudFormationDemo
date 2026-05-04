@@ -240,32 +240,68 @@ Resources:
       UserData:
         Fn::Base64: |
           #!/bin/bash
-          set -e
+          
+          # Enable logging
+          exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+          
+          echo "Starting UserData script execution..."
           
           # Update system packages
-          yum update -y
+          echo "Updating system packages..."
+          yum update -y || echo "yum update failed, continuing..."
           
           # Install Docker
+          echo "Installing Docker..."
           amazon-linux-extras install docker -y
+          
+          # Start and enable Docker
+          echo "Starting Docker service..."
           systemctl start docker
           systemctl enable docker
           
           # Add ec2-user to docker group
+          echo "Adding ec2-user to docker group..."
           usermod -aG docker ec2-user
           
+          # Wait for Docker to be ready
+          echo "Waiting for Docker to be ready..."
+          sleep 10
+          
           # Stop and remove existing container if it exists
+          echo "Cleaning up existing containers..."
           docker stop springboot-app 2>/dev/null || true
           docker rm springboot-app 2>/dev/null || true
           
           # Pull the latest Spring Boot image from ECR Public
-          docker pull public.ecr.aws/a9m5d1a5/skumar:latest
+          echo "Pulling Docker image..."
+          docker pull public.ecr.aws/a9m5d1a5/skumar:latest || {
+            echo "Docker pull failed, retrying in 30 seconds..."
+            sleep 30
+            docker pull public.ecr.aws/a9m5d1a5/skumar:latest || {
+              echo "Docker pull failed again, trying nginx as fallback..."
+              docker pull nginx:latest
+              IMAGE_TO_USE="nginx:latest"
+              PORT_MAPPING="-p 80:80"
+            }
+          }
           
-          # Run the Spring Boot application container
-          # Assuming your app runs on port 8080, mapping to host port 80
-          docker run -d --name springboot-app -p 80:8080 public.ecr.aws/a9m5d1a5/skumar:latest
+          # Use fallback image if pull failed
+          IMAGE_TO_USE=${IMAGE_TO_USE:-"public.ecr.aws/a9m5d1a5/skumar:latest"}
+          PORT_MAPPING=${PORT_MAPPING:-"-p 80:8080"}
+          
+          # Run the application container
+          echo "Running container with image: $IMAGE_TO_USE"
+          docker run -d --name springboot-app $PORT_MAPPING $IMAGE_TO_USE
+          
+          # Verify container is running
+          echo "Checking container status..."
+          docker ps
+          
+          echo "UserData script completed successfully!"
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-Instance'
+
 
   # Application Load Balancer
   MyALB:
