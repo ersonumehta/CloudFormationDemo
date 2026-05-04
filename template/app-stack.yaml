@@ -1,0 +1,154 @@
+﻿AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Application Stack - EC2, ALB, Target Groups, Listeners, EICE'
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: Dev
+    Description: Environment name prefix
+  ServiceName:
+    Type: String
+    Default: UserSetting
+    Description: Service name for the application
+  EnvIdentifier:
+    Type: String
+    Default: q1w
+    Description: Environment identifier
+  CustomAMIId:
+    Type: String
+    Description: Custom AMI ID from your Spring Boot Gradle build (leave blank to use latest Amazon Linux 2)
+    Default: ''
+  NetworkingStackName:
+    Type: String
+    Description: Name of the networking stack to import values from
+    Default: networking-stack
+Conditions:
+  UseCustomAMI: !Not [!Equals [!Ref CustomAMIId, '']]
+Resources:
+  # EC2 Instance
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !If
+        - UseCustomAMI
+        - !Ref CustomAMIId
+        - !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
+      InstanceType: t3.micro
+      SubnetId: !ImportValue
+        !Sub '----PrivateSubnet1-ID'
+      SecurityGroupIds:
+        - !ImportValue
+          !Sub '----EC2-SG-ID'
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+          echo "Starting UserData script..."
+          yum update -y || echo "yum update failed, continuing..."
+          amazon-linux-extras install docker -y
+          systemctl start docker
+          systemctl enable docker
+          usermod -aG docker ec2-user
+          sleep 10
+          docker stop springboot-app 2>/dev/null || true
+          docker rm springboot-app 2>/dev/null || true
+          docker pull public.ecr.aws/a9m5d1a5/skumar:latest || {
+            sleep 30
+            docker pull public.ecr.aws/a9m5d1a5/skumar:latest || {
+              docker pull nginx:latest
+              IMAGE_TO_USE="nginx:latest"
+              PORT_MAPPING="-p 80:80"
+            }
+          }
+          IMAGE_TO_USE=
+          PORT_MAPPING=
+          docker run -d --name springboot-app  
+          docker ps
+          echo "UserData script completed successfully!"
+      Tags:
+        - Key: Name
+          Value: !Sub '---EC2-Instance'
+  # Application Load Balancer
+  MyALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '---ALB'
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !ImportValue
+          !Sub '----PublicSubnet1-ID'
+        - !ImportValue
+          !Sub '----PublicSubnet2-ID'
+      SecurityGroups:
+        - !ImportValue
+          !Sub '----ALB-SG-ID'
+      Tags:
+        - Key: Name
+          Value: !Sub '---ALB'
+  # Target Group for ALB
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '---TG'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !ImportValue
+        !Sub '----VPC-ID'
+      TargetType: instance
+      Targets:
+        - Id: !Ref MyEC2Instance
+          Port: 80
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub '---TG'
+  # ALB Listener
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MyALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+  # EC2 Instance Connect Endpoint
+  EC2InstanceConnectEndpoint:
+    Type: AWS::EC2::InstanceConnectEndpoint
+    Properties:
+      SubnetId: !ImportValue
+        !Sub '----PrivateSubnet1-ID'
+      SecurityGroupIds:
+        - !ImportValue
+          !Sub '----EICE-SG-ID'
+      Tags:
+        - Key: Name
+          Value: !Sub '---EICE'
+Outputs:
+  EC2InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref MyEC2Instance
+    Export:
+      Name: !Sub '---EC2-InstanceID'
+  EC2PrivateIP:
+    Description: EC2 Private IP Address
+    Value: !GetAtt MyEC2Instance.PrivateIp
+    Export:
+      Name: !Sub '---EC2-PrivateIP'
+  ALBDNSName:
+    Description: DNS name of the Load Balancer
+    Value: !GetAtt MyALB.DNSName
+    Export:
+      Name: !Sub '---ALB-DNSName'
+  EC2InstanceConnectEndpointId:
+    Description: EC2 Instance Connect Endpoint ID
+    Value: !Ref EC2InstanceConnectEndpoint
+    Export:
+      Name: !Sub '---EICE-ID'
