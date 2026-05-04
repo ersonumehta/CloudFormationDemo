@@ -24,7 +24,6 @@ Parameters:
 Conditions:
   UseCustomAMI: !Not [!Equals [!Ref CustomAMIId, '']]
 Resources:
-  # EC2 Instance
   MyEC2Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -34,10 +33,10 @@ Resources:
         - !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
       InstanceType: t3.micro
       SubnetId: !ImportValue
-        !Sub '----PrivateSubnet1-ID'
+        !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
         - !ImportValue
-          !Sub '----EC2-SG-ID'
+          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
       UserData:
         Fn::Base64: |
           #!/bin/bash
@@ -59,42 +58,40 @@ Resources:
               PORT_MAPPING="-p 80:80"
             }
           }
-          IMAGE_TO_USE=
-          PORT_MAPPING=
-          docker run -d --name springboot-app  
+          IMAGE_TO_USE=${IMAGE_TO_USE:-"public.ecr.aws/a9m5d1a5/skumar:latest"}
+          PORT_MAPPING=${PORT_MAPPING:-"-p 80:8080"}
+          docker run -d --name springboot-app $PORT_MAPPING $IMAGE_TO_USE
           docker ps
           echo "UserData script completed successfully!"
       Tags:
         - Key: Name
-          Value: !Sub '---EC2-Instance'
-  # Application Load Balancer
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-Instance'
   MyALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub '---ALB'
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
       Type: application
       Scheme: internet-facing
       IpAddressType: ipv4
       Subnets:
         - !ImportValue
-          !Sub '----PublicSubnet1-ID'
+          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
         - !ImportValue
-          !Sub '----PublicSubnet2-ID'
+          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
       SecurityGroups:
         - !ImportValue
-          !Sub '----ALB-SG-ID'
+          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
       Tags:
         - Key: Name
-          Value: !Sub '---ALB'
-  # Target Group for ALB
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
   MyTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub '---TG'
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-TG'
       Port: 80
       Protocol: HTTP
       VpcId: !ImportValue
-        !Sub '----VPC-ID'
+        !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
       TargetType: instance
       Targets:
         - Id: !Ref MyEC2Instance
@@ -108,8 +105,7 @@ Resources:
       UnhealthyThresholdCount: 3
       Tags:
         - Key: Name
-          Value: !Sub '---TG'
-  # ALB Listener
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-TG'
   ALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -119,36 +115,35 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref MyTargetGroup
-  # EC2 Instance Connect Endpoint
   EC2InstanceConnectEndpoint:
     Type: AWS::EC2::InstanceConnectEndpoint
     Properties:
       SubnetId: !ImportValue
-        !Sub '----PrivateSubnet1-ID'
+        !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
         - !ImportValue
-          !Sub '----EICE-SG-ID'
+          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
       Tags:
         - Key: Name
-          Value: !Sub '---EICE'
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE'
 Outputs:
   EC2InstanceId:
     Description: EC2 Instance ID
     Value: !Ref MyEC2Instance
     Export:
-      Name: !Sub '---EC2-InstanceID'
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-InstanceID'
   EC2PrivateIP:
     Description: EC2 Private IP Address
     Value: !GetAtt MyEC2Instance.PrivateIp
     Export:
-      Name: !Sub '---EC2-PrivateIP'
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-PrivateIP'
   ALBDNSName:
     Description: DNS name of the Load Balancer
     Value: !GetAtt MyALB.DNSName
     Export:
-      Name: !Sub '---ALB-DNSName'
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-DNSName'
   EC2InstanceConnectEndpointId:
     Description: EC2 Instance Connect Endpoint ID
     Value: !Ref EC2InstanceConnectEndpoint
     Export:
-      Name: !Sub '---EICE-ID'
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-ID'
