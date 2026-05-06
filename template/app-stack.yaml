@@ -91,8 +91,9 @@ Resources:
       Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-TG'
       Port: 80
       Protocol: HTTP
-      VpcId: !ImportValue
-        !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
+      VpcId:
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
       TargetType: instance
       Targets:
         - Id: !Ref MyEC2Instance
@@ -119,8 +120,9 @@ Resources:
   EC2InstanceConnectEndpoint:
     Type: AWS::EC2::InstanceConnectEndpoint
     Properties:
-      SubnetId: !ImportValue
-        !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
+      SubnetId:
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
         !ImportValue
         Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
