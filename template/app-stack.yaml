@@ -33,11 +33,11 @@ Resources:
         - !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
       InstanceType: t3.micro
       SubnetId:
-        - !ImportValue
-          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
-        - !ImportValue
-          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
       UserData:
         Fn::Base64: |
           #!/bin/bash
@@ -75,13 +75,13 @@ Resources:
       Scheme: internet-facing
       IpAddressType: ipv4
       Subnets:
-        - !ImportValue
-          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
-        - !ImportValue
-          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
+      !ImportValue
+      Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
       SecurityGroups:
-        - !ImportValue
-          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
@@ -122,8 +122,8 @@ Resources:
       SubnetId: !ImportValue
         !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
-        - !ImportValue
-          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
+        !ImportValue
+        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE'
