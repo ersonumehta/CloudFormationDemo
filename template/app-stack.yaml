@@ -36,8 +36,8 @@ Resources:
         !ImportValue
         Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
-        !ImportValue
-        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
+        - !ImportValue
+          Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
       UserData:
         Fn::Base64: |
           #!/bin/bash
@@ -80,8 +80,8 @@ Resources:
         - !ImportValue
           Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
       SecurityGroups:
-        !ImportValue
-        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
+        - !ImportValue
+          Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
@@ -124,8 +124,8 @@ Resources:
         !ImportValue
         Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
-        !ImportValue
-        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
+        - !ImportValue
+          Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE'
