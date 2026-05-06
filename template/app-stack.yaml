@@ -75,10 +75,10 @@ Resources:
       Scheme: internet-facing
       IpAddressType: ipv4
       Subnets:
-        !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
-      !ImportValue
-      Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
+        - !ImportValue
+         Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
+        - !ImportValue
+          Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
       SecurityGroups:
         !ImportValue
         Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
