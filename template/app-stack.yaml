@@ -32,8 +32,9 @@ Resources:
         - !Ref CustomAMIId
         - !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
       InstanceType: t3.micro
-      SubnetId: !ImportValue
-        !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
+      SubnetId:
+        - !ImportValue
+          !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
         - !ImportValue
           !Sub '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
