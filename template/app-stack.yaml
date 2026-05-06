@@ -34,10 +34,10 @@ Resources:
       InstanceType: t3.micro
       SubnetId:
         !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
+        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
         !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
+        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
       UserData:
         Fn::Base64: |
           #!/bin/bash
@@ -76,12 +76,12 @@ Resources:
       IpAddressType: ipv4
       Subnets:
         - !ImportValue
-          Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
+          Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet1-ID'
         - !ImportValue
-          Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
+          Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet2-ID'
       SecurityGroups:
         !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
+        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB-SG-ID'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-ALB'
@@ -93,7 +93,7 @@ Resources:
       Protocol: HTTP
       VpcId:
         !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
+        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
       TargetType: instance
       Targets:
         - Id: !Ref MyEC2Instance
@@ -122,10 +122,10 @@ Resources:
     Properties:
       SubnetId:
         !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
+        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet1-ID'
       SecurityGroupIds:
         !ImportValue
-        Fn::Sub: '${NetworkingStackName}-${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
+        Fn::Sub: '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE'
