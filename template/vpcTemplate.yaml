@@ -85,7 +85,7 @@ Resources:
       VpcId: !Ref MyVPC
       Tags:
         - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicRT'
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicRTable'
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -110,7 +110,7 @@ Resources:
       VpcId: !Ref MyVPC
       Tags:
         - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateRT'
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateRTable'
 
 
   PrivateSubnetRouteTableAssociation:
