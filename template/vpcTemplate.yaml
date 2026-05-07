@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'VPC Template - VPC, Subnets, Gateways, Route Tables, and Security Groups'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: Dev
+    Description: Environment name prefix
+
+  ServiceName:
+    Type: String
+    Default: UserSetting
+    Description: Service name for the application
+
+  EnvIdentifier:
+    Type: String
+    Default: q1w
+    Description: Environment identifier
+
+Resources:
+  # ============================================================
+  # VPC Configuration
+  # ============================================================
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC'
+
+  # ============================================================
+  # Internet Gateway
+  # ============================================================
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-IGW'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ============================================================
+  # Public Subnet
+  # ============================================================
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet'
+
+  # ============================================================
+  # Private Subnet
+  # ============================================================
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet'
+
+
+
+  # ============================================================
+  # Public Route Table
+  # ============================================================
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicRT'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # ============================================================
+  # Private Route Table
+  # ============================================================
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateRT'
+
+
+  PrivateSubnetRouteTableAssociation:
+     Type: AWS::EC2::SubnetRouteTableAssociation
+     Properties:
+       SubnetId: !Ref PrivateSubnet
+       RouteTableId: !Ref PrivateRouteTable
+
+   # ============================================================
+   # Security Group for EC2
+   # ============================================================
+  EC2SecurityGroup:
+     Type: AWS::EC2::SecurityGroup
+     Properties:
+       GroupDescription: Security group for EC2 instance
+       VpcId: !Ref MyVPC
+       SecurityGroupIngress:
+         - IpProtocol: tcp
+           FromPort: 22
+           ToPort: 22
+           SourceSecurityGroupId: !Ref EC2InstanceConnectSG
+           Description: SSH from EC2 Instance Connect Endpoint
+         - IpProtocol: tcp
+           FromPort: 80
+           ToPort: 80
+           CidrIp: 0.0.0.0/0
+           Description: HTTP access
+         - IpProtocol: tcp
+           FromPort: 8080
+           ToPort: 8080
+           CidrIp: 0.0.0.0/0
+           Description: Custom App Port
+       SecurityGroupEgress:
+         - IpProtocol: -1
+           CidrIp: 0.0.0.0/0
+       Tags:
+         - Key: Name
+           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG'
+
+   # ============================================================
+   # Security Group for EC2 Instance Connect Endpoint
+   # ============================================================
+  EC2InstanceConnectSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for EC2 Instance Connect Endpoint
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for EC2 Instance Connect
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG'
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref MyVPC
+    Export:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
+
+  PublicSubnetId:
+    Description: Public Subnet ID
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet-ID'
+
+  PrivateSubnetId:
+    Description: Private Subnet ID
+    Value: !Ref PrivateSubnet
+    Export:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet-ID'
+
+
+  EC2SecurityGroupId:
+    Description: EC2 Security Group ID
+    Value: !Ref EC2SecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
+
+  EC2InstanceConnectSGId:
+    Description: EC2 Instance Connect Endpoint Security Group ID
+    Value: !Ref EC2InstanceConnectSG
+    Export:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EICE-SG-ID'
+
+
