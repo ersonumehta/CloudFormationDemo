@@ -1,0 +1,17 @@
+# Select all VPC resources being created or updated
+let vpcs = Resources.*[ Type == 'AWS::EC2::VPC' ]
+
+rule VPC_NAME_CANNOT_CONTAIN_DEL when %vpcs !empty {
+    # Extract the Tags block from the VPC
+    %vpcs.Properties.Tags exists
+
+    # Iterate through all tags to find the 'Name' tag
+    # Verify that the value does not match the regex containing 'DEL'
+    when %vpcs.Properties.Tags.*[ Key == 'Name' ] exists {
+        %vpcs.Properties.Tags.*[ Key == 'Name' ].Value != /.*DEL.*/
+        <<
+            Violation: VPC Name tag must not contain the substring "DEL".
+            Fix: Rename your VPC to remove the "DEL" prefix/suffix.
+        >>
+    }
+}

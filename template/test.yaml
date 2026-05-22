@@ -1,0 +1,36 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Test STack'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: Dev
+    Description: Environment name prefix
+
+  ServiceName:
+    Type: String
+    Default: UserSetting
+    Description: Service name for the application
+
+  EnvIdentifier:
+    Type: String
+    Default: q1w
+    Description: Environment identifier
+
+Resources:
+  # VPC Configuration
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC'
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref MyVPC
+    Export:
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'

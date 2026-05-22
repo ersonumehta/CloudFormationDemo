@@ -1,0 +1,36 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Deploys a CloudFormation Hook to prevent VPC names containing DEL'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: Dev
+    Description: Environment name prefix
+
+Resources:
+  VpcNameGuardHook:
+    Type: AWS::CloudFormation::Hook
+    Properties:
+      Alias: !Sub 'MyCompany::VpcGovernance::NameCheckHook-${EnvironmentName}'
+      Configuration:
+        CloudFormationConfiguration:
+          HookConfiguration:
+            TargetOperations:
+              - CREATE
+              - UPDATE
+            FailureMode: FAIL
+            Properties: {}
+      ExecutionRole: 'arn:aws:iam::734836383818:role/TestCloudFormationExecution'
+      Properties:
+        RuleLocation:
+          S3Location:
+            Bucket: 'generalusebucket-734836383818-us-east-1-an'
+            Key: 'vpcName.guard'
+
+Outputs:
+  HookArn:
+    Description: ARN of the VPC Name Guard Hook
+    Value: !GetAtt VpcNameGuardHook.Arn
+  HookId:
+    Description: Hook ID
+    Value: !Ref VpcNameGuardHook

@@ -1,0 +1,8 @@
+Resources:
+  MyInvalidVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: PROD-DEL-VPC # Triggers the hook constraint!

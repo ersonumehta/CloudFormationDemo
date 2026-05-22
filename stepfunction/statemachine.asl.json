@@ -1,0 +1,315 @@
+{
+  "Comment": "Admin Access Approval Workflow - Orchestrates the approval process for admin permission assignments",
+  "StartAt": "ValidatePermission",
+  "States": {
+    "ValidatePermission": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ValidatePermissionFunctionArn}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.validationResult",
+      "ResultSelector": {
+        "requiresApproval.$": "$.Payload.requiresApproval",
+        "assignmentId.$": "$.Payload.assignmentId",
+        "userDetails.$": "$.Payload.userDetails",
+        "permissionDetails.$": "$.Payload.permissionDetails",
+        "timestamp.$": "$.Payload.timestamp",
+        "eventName.$": "$.Payload.eventName",
+        "assignedBy.$": "$.Payload.assignedBy",
+        "reason.$": "$.Payload.reason"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ValidationFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "CheckApprovalRequired"
+    },
+    "CheckApprovalRequired": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validationResult.requiresApproval",
+          "BooleanEquals": false,
+          "Next": "NoApprovalNeeded"
+        }
+      ],
+      "Default": "PrepareNotification"
+    },
+    "NoApprovalNeeded": {
+      "Type": "Pass",
+      "Result": {
+        "status": "completed",
+        "message": "No approval required"
+      },
+      "End": true
+    },
+    "PrepareNotification": {
+      "Type": "Pass",
+      "Parameters": {
+        "assignmentId.$": "$.validationResult.assignmentId",
+        "userDetails.$": "$.validationResult.userDetails",
+        "permissionDetails.$": "$.validationResult.permissionDetails",
+        "assignedBy.$": "$.validationResult.assignedBy",
+        "timestamp.$": "$.validationResult.timestamp",
+        "taskToken.$": "$$.Task.Token",
+        "apiGatewayUrl": "${ApiGatewayUrl}"
+      },
+      "ResultPath": "$.notificationData",
+      "Next": "GenerateApprovalTokens"
+    },
+    "GenerateApprovalTokens": {
+      "Type": "Pass",
+      "Parameters": {
+        "approveToken.$": "States.Format('{}|{}|approve', $.notificationData.assignmentId, $.notificationData.taskToken)",
+        "rejectToken.$": "States.Format('{}|{}|reject', $.notificationData.assignmentId, $.notificationData.taskToken)"
+      },
+      "ResultPath": "$.tokens",
+      "Next": "SendApprovalNotification"
+    },
+    "SendApprovalNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${PublishApprovalFunctionArn}",
+        "Payload.$": "$.notificationData"
+      },
+      "ResultPath": "$.publishResult",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotificationFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "WaitForApproval"
+    },
+    "WaitForApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${ApprovalCallbackFunctionArn}",
+        "Payload": {
+          "taskToken.$": "$$.Task.Token",
+          "assignmentId.$": "$.notificationData.assignmentId"
+        }
+      },
+      "ResultPath": "$.approvalResult",
+      "ResultSelector": {
+        "decision.$": "$.Payload.decision",
+        "assignmentId.$": "$.Payload.assignmentId",
+        "timestamp.$": "$.Payload.timestamp"
+      },
+      "TimeoutSeconds": 86400,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.Timeout"],
+          "Next": "ApprovalTimeout",
+          "ResultPath": "$.error"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ApprovalFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "ProcessDecision"
+    },
+    "ProcessDecision": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.approvalResult.decision",
+          "StringEquals": "approve",
+          "Next": "Approved"
+        },
+        {
+          "Variable": "$.approvalResult.decision",
+          "StringEquals": "reject",
+          "Next": "RemovePermission"
+        }
+      ],
+      "Default": "ApprovalFailed"
+    },
+    "Approved": {
+      "Type": "Pass",
+      "Result": {
+        "status": "approved",
+        "message": "Admin access approved, no action taken"
+      },
+      "Next": "SendApprovalConfirmation"
+    },
+    "RemovePermission": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${RemovePermissionFunctionArn}",
+        "Payload": {
+          "assignmentId.$": "$.notificationData.assignmentId",
+          "userDetails.$": "$.notificationData.userDetails",
+          "permissionDetails.$": "$.notificationData.permissionDetails"
+        }
+      },
+      "ResultPath": "$.removalResult",
+      "ResultSelector": {
+        "success.$": "$.Payload.success",
+        "assignmentId.$": "$.Payload.assignmentId",
+        "principalName.$": "$.Payload.principalName",
+        "policyName.$": "$.Payload.policyName",
+        "timestamp.$": "$.Payload.timestamp",
+        "errorMessage.$": "$.Payload.errorMessage"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "RemovalFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "CheckRemovalSuccess"
+    },
+    "CheckRemovalSuccess": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.removalResult.success",
+          "BooleanEquals": true,
+          "Next": "Rejected"
+        }
+      ],
+      "Default": "RemovalFailed"
+    },
+    "Rejected": {
+      "Type": "Pass",
+      "Result": {
+        "status": "rejected",
+        "message": "Admin access rejected and removed successfully"
+      },
+      "Next": "SendRejectionConfirmation"
+    },
+    "SendApprovalConfirmation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNSTopicArn}",
+        "Subject": "✅ Admin Access Approved",
+        "Message.$": "States.Format('Admin Access Approval Confirmation\n\nThe following admin access has been approved:\n\nUser: {}\nUser ARN: {}\nPermission: {}\nAssignment ID: {}\nApproved At: {}\n\nNo action was taken. The permission remains assigned.', $.notificationData.userDetails.name, $.notificationData.userDetails.arn, $.notificationData.permissionDetails.name, $.notificationData.assignmentId, $.approvalResult.timestamp)"
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "SendRejectionConfirmation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNSTopicArn}",
+        "Subject": "❌ Admin Access Rejected and Removed",
+        "Message.$": "States.Format('Admin Access Rejection Confirmation\n\nThe following admin access has been rejected and removed:\n\nUser: {}\nUser ARN: {}\nPermission: {}\nAssignment ID: {}\nRejected At: {}\nRemoved At: {}\n\nThe permission has been successfully detached.', $.notificationData.userDetails.name, $.notificationData.userDetails.arn, $.notificationData.permissionDetails.name, $.notificationData.assignmentId, $.approvalResult.timestamp, $.removalResult.timestamp)"
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "ApprovalTimeout": {
+      "Type": "Pass",
+      "Result": {
+        "status": "timeout",
+        "message": "Approval request timed out after 24 hours"
+      },
+      "Next": "SendTimeoutNotification"
+    },
+    "SendTimeoutNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNSTopicArn}",
+        "Subject": "⏰ Admin Access Approval Timeout",
+        "Message.$": "States.Format('Admin Access Approval Timeout\n\nThe following admin access approval request has timed out:\n\nUser: {}\nUser ARN: {}\nPermission: {}\nAssignment ID: {}\n\nNo action was taken within 24 hours. Please review manually if needed.', $.notificationData.userDetails.name, $.notificationData.userDetails.arn, $.notificationData.permissionDetails.name, $.notificationData.assignmentId)"
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "ValidationFailed": {
+      "Type": "Pass",
+      "Result": {
+        "status": "validation_failed",
+        "message": "Permission validation failed"
+      },
+      "End": true
+    },
+    "NotificationFailed": {
+      "Type": "Pass",
+      "Result": {
+        "status": "notification_failed",
+        "message": "Failed to send approval notification"
+      },
+      "End": true
+    },
+    "ApprovalFailed": {
+      "Type": "Pass",
+      "Result": {
+        "status": "approval_failed",
+        "message": "Approval process failed"
+      },
+      "End": true
+    },
+    "RemovalFailed": {
+      "Type": "Pass",
+      "Result": {
+        "status": "removal_failed",
+        "message": "Failed to remove admin permission"
+      },
+      "Next": "SendRemovalFailureNotification"
+    },
+    "SendRemovalFailureNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SNSTopicArn}",
+        "Subject": "⚠️ Admin Access Removal Failed",
+        "Message.$": "States.Format('Admin Access Removal Failure\n\nFailed to remove the following admin access:\n\nUser: {}\nUser ARN: {}\nPermission: {}\nAssignment ID: {}\n\nPlease investigate and remove the permission manually.', $.notificationData.userDetails.name, $.notificationData.userDetails.arn, $.notificationData.permissionDetails.name, $.notificationData.assignmentId)"
+      },
+      "ResultPath": null,
+      "End": true
+    }
+  }
+}

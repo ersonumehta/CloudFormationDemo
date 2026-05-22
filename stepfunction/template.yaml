@@ -1,0 +1,587 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Admin Access Approval Workflow - Serverless security workflow for approving admin permission assignments
+
+Parameters:
+  SecurityTeamEmail:
+    Type: String
+    Description: Email address for the security team to receive approval notifications
+    Default: security-team@example.com
+  
+  ApprovalTokenExpiryHours:
+    Type: Number
+    Description: Number of hours before approval tokens expire
+    Default: 24
+    MinValue: 1
+    MaxValue: 168
+  
+  AdminPolicyPatterns:
+    Type: String
+    Description: Comma-separated list of policy name patterns to consider as admin-level
+    Default: "AdministratorAccess,PowerUserAccess,IAMFullAccess"
+  
+  EnableAuditLogging:
+    Type: String
+    Description: Enable S3 audit logging for permission removals
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  AppSecret:
+    Type: String
+    NoEcho: true
+    Description: HMAC secret used to sign approval tokens (supply a secure value)
+
+Conditions:
+  CreateAuditBucket: !Equals [!Ref EnableAuditLogging, "true"]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+  # ==================== DynamoDB Table ====================
+  AdminAccessApprovalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: AdminAccessApprovals
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: assignmentId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: assignmentId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Purpose
+          Value: AdminAccessApproval
+        - Key: ManagedBy
+          Value: SAM
+
+  # NOTE: KMS Key removed - tokens are HMAC-signed using AppSecret parameter
+
+  # ==================== SNS Topic for Notifications ====================
+  SecurityTeamApprovalTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: AdminAccessApprovalNotifications
+      DisplayName: Admin Access Approval Notifications
+      Tags:
+        - Key: Purpose
+          Value: AdminAccessApproval
+
+  SecurityTeamEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref SecurityTeamApprovalTopic
+      Endpoint: !Ref SecurityTeamEmail
+
+  # ==================== S3 Bucket for Audit Logs (Optional) ====================
+  AuditLogsBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateAuditBucket
+    Properties:
+      BucketName: !Sub 'admin-access-audit-logs-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 2555  # 7 years
+            NoncurrentVersionExpirationInDays: 90
+      Tags:
+        - Key: Purpose
+          Value: AdminAccessApproval
+
+  # ==================== Lambda Functions ====================
+  
+  # Lambda Function: Validate Permission
+  ValidatePermissionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AdminAccessApproval-ValidatePermission
+      CodeUri: functions/validate_permission/
+      Handler: app.lambda_handler
+      Description: Validates IAM policy assignments and determines if approval is needed
+      Environment:
+        Variables:
+          APPROVALS_TABLE: !Ref AdminAccessApprovalsTable
+          ADMIN_POLICY_PATTERNS: !Ref AdminPolicyPatterns
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminAccessApprovalsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iam:GetUser
+                - iam:GetRole
+                - iam:GetPolicy
+                - iam:GetPolicyVersion
+                - iam:ListUserTags
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/admin-access-approval/*'
+      Tags:
+        Purpose: AdminAccessApproval
+
+  ValidatePermissionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ValidatePermissionFunction}'
+      RetentionInDays: 30
+
+  # Lambda Function: Publish Approval (generates encrypted tokens and sends notifications)
+  PublishApprovalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AdminAccessApproval-PublishApproval
+      CodeUri: functions/publish_approval/
+      Handler: app.lambda_handler
+      Description: Generates encrypted approval/rejection tokens and publishes notification to SNS
+      Timeout: 30
+      Environment:
+        Variables:
+          APPROVALS_TABLE: !Ref AdminAccessApprovalsTable
+          SNS_TOPIC_ARN: !Ref SecurityTeamApprovalTopic
+          API_BASE_URL: !Sub 'https://${ApprovalApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+          TOKEN_EXPIRY_HOURS: !Ref ApprovalTokenExpiryHours
+          APP_SECRET: !Ref AppSecret
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminAccessApprovalsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt SecurityTeamApprovalTopic.TopicName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      Tags:
+        Purpose: AdminAccessApproval
+
+  PublishApprovalLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PublishApprovalFunction}'
+      RetentionInDays: 30
+
+  # Lambda Function: Approval Callback
+  ApprovalCallbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AdminAccessApproval-ApprovalCallback
+      CodeUri: functions/approval_callback/
+      Handler: app.lambda_handler
+      Description: Handles approval/rejection callbacks from API Gateway
+      Timeout: 30
+      Environment:
+        Variables:
+          APPROVALS_TABLE: !Ref AdminAccessApprovalsTable
+          TOKEN_EXPIRY_HOURS: !Ref ApprovalTokenExpiryHours
+          APP_SECRET: !Ref AppSecret
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminAccessApprovalsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - states:SendTaskSuccess
+                - states:SendTaskFailure
+              Resource: '*'
+      Events:
+        ApproveApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApprovalApi
+            Path: /approve
+            Method: GET
+        RejectApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApprovalApi
+            Path: /reject
+            Method: GET
+      Tags:
+        Purpose: AdminAccessApproval
+
+  ApprovalCallbackLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ApprovalCallbackFunction}'
+      RetentionInDays: 30
+
+  # Lambda Function: Remove Permission
+  RemovePermissionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AdminAccessApproval-RemovePermission
+      CodeUri: functions/remove_permission/
+      Handler: app.lambda_handler
+      Description: Removes admin permissions when access is rejected
+      Timeout: 90
+      Environment:
+        Variables:
+          APPROVALS_TABLE: !Ref AdminAccessApprovalsTable
+          SNS_TOPIC_ARN: !Ref SecurityTeamApprovalTopic
+          AUDIT_BUCKET: !If [CreateAuditBucket, !Ref AuditLogsBucket, '']
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminAccessApprovalsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt SecurityTeamApprovalTopic.TopicName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - iam:DetachUserPolicy
+                - iam:DetachRolePolicy
+                - iam:DetachGroupPolicy
+                - iam:DeleteUserPolicy
+                - iam:DeleteRolePolicy
+                - iam:DeleteGroupPolicy
+                - iam:ListAttachedUserPolicies
+                - iam:ListAttachedRolePolicies
+                - iam:ListUserPolicies
+                - iam:ListRolePolicies
+              Resource: '*'
+            - !If
+              - CreateAuditBucket
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${AuditLogsBucket.Arn}/*'
+              - !Ref AWS::NoValue
+      Tags:
+        Purpose: AdminAccessApproval
+
+  RemovePermissionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${RemovePermissionFunction}'
+      RetentionInDays: 30
+
+  # ==================== API Gateway ====================
+  ApprovalApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: AdminAccessApprovalAPI
+      StageName: prod
+      Description: API for handling admin access approval callbacks
+      EndpointConfiguration:
+        Type: REGIONAL
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+          ThrottlingBurstLimit: 200
+          ThrottlingRateLimit: 100
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApprovalApiLogGroup.Arn
+        Format: '$context.requestId $context.error.message $context.error.messageString'
+      Tags:
+        Purpose: AdminAccessApproval
+
+  ApprovalApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/AdminAccessApprovalAPI'
+      RetentionInDays: 30
+
+  # ==================== Step Functions State Machine ====================
+  AdminAccessApprovalStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: AdminAccessApprovalWorkflow
+      DefinitionUri: statemachine.asl.json
+      DefinitionSubstitutions:
+        ValidatePermissionFunctionArn: !GetAtt ValidatePermissionFunction.Arn
+        PublishApprovalFunctionArn: !GetAtt PublishApprovalFunction.Arn
+        ApprovalCallbackFunctionArn: !GetAtt ApprovalCallbackFunction.Arn
+        RemovePermissionFunctionArn: !GetAtt RemovePermissionFunction.Arn
+        SNSTopicArn: !Ref SecurityTeamApprovalTopic
+        ApiGatewayUrl: !Sub 'https://${ApprovalApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+      Role: !GetAtt StateMachineExecutionRole.Arn
+      Logging:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+      Tracing:
+        Enabled: true
+      Tags:
+        Purpose: AdminAccessApproval
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/states/AdminAccessApprovalWorkflow'
+      RetentionInDays: 30
+
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AdminAccessApprovalStateMachineRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/CloudWatchLogsFullAccess'
+      Policies:
+        - PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ValidatePermissionFunction.Arn
+                  - !GetAtt ApprovalCallbackFunction.Arn
+                  - !GetAtt RemovePermissionFunction.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref SecurityTeamApprovalTopic
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+      Tags:
+        - Key: Purpose
+          Value: AdminAccessApproval
+
+  # ==================== EventBridge Rule ====================
+  AdminPolicyAssignmentRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: CaptureAdminPolicyAssignments
+      Description: Captures IAM admin policy assignment events and triggers approval workflow
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.iam
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventName:
+            - AttachUserPolicy
+            - AttachRolePolicy
+            - AttachGroupPolicy
+            - PutUserPolicy
+            - PutRolePolicy
+            - PutGroupPolicy
+      Targets:
+        - Arn: !GetAtt AdminAccessApprovalStateMachine.Arn
+          RoleArn: !GetAtt EventBridgeExecutionRole.Arn
+          Id: AdminAccessApprovalWorkflow
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+            MaximumEventAge: 3600
+          DeadLetterConfig:
+            Arn: !GetAtt EventBridgeDLQ.Arn
+
+  EventBridgeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AdminAccessApprovalEventBridgeRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: StartStateMachinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt AdminAccessApprovalStateMachine.Arn
+      Tags:
+        - Key: Purpose
+          Value: AdminAccessApproval
+
+  EventBridgeDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: AdminAccessApproval-EventBridge-DLQ
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Purpose
+          Value: AdminAccessApproval
+
+  EventBridgeDLQPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref EventBridgeDLQ
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt EventBridgeDLQ.Arn
+
+  # ==================== CloudWatch Alarms ====================
+  StateMachineFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: AdminAccessApproval-StateMachine-Failures
+      AlarmDescription: Alert when state machine executions fail
+      MetricName: ExecutionsFailed
+      Namespace: AWS/States
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref AdminAccessApprovalStateMachine
+      TreatMissingData: notBreaching
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: AdminAccessApproval-Lambda-Errors
+      AlarmDescription: Alert when Lambda functions have errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+# ==================== Outputs ====================
+Outputs:
+  DynamoDBTableName:
+    Description: DynamoDB table for storing approval requests
+    Value: !Ref AdminAccessApprovalsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-ApprovalsTable'
+
+  SNSTopicArn:
+    Description: SNS topic for approval notifications
+    Value: !Ref SecurityTeamApprovalTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-SNSTopic'
+
+  ApiGatewayUrl:
+    Description: API Gateway URL for approval callbacks
+    Value: !Sub 'https://${ApprovalApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  StateMachineArn:
+    Description: Step Functions state machine ARN
+    Value: !Ref AdminAccessApprovalStateMachine
+    Export:
+      Name: !Sub '${AWS::StackName}-StateMachine'
+
+  ValidatePermissionFunctionArn:
+    Description: Validate Permission Lambda function ARN
+    Value: !GetAtt ValidatePermissionFunction.Arn
+
+  ApprovalCallbackFunctionArn:
+    Description: Approval Callback Lambda function ARN
+    Value: !GetAtt ApprovalCallbackFunction.Arn
+
+  RemovePermissionFunctionArn:
+    Description: Remove Permission Lambda function ARN
+    Value: !GetAtt RemovePermissionFunction.Arn
+
+  # KMSKeyId output removed - tokens are HMAC-signed using the AppSecret parameter
+
+  AuditBucketName:
+    Condition: CreateAuditBucket
+    Description: S3 bucket for audit logs
+    Value: !Ref AuditLogsBucket
+
+  EventBridgeRuleName:
+    Description: EventBridge rule name
+    Value: !Ref AdminPolicyAssignmentRule

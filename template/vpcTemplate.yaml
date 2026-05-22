@@ -17,160 +17,49 @@ Parameters:
     Default: q1w
     Description: Environment identifier
 
+  CreateBucketIfNotExists:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Create the S3 bucket only if it doesn't exist
+
+Conditions:
+  ShouldCreateBucket: !Equals [ !Ref CreateBucketIfNotExists, 'true' ]
+
 Resources:
-  # ============================================================
-  # VPC Configuration
-  # ============================================================
-  MyVPC:
-    Type: AWS::EC2::VPC
-    Properties:
-      CidrBlock: 10.0.0.0/16
-      EnableDnsHostnames: true
-      EnableDnsSupport: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC'
-
-  # ============================================================
-  # Internet Gateway
-  # ============================================================
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-IGW'
-
-  AttachGateway:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref MyVPC
-      InternetGatewayId: !Ref InternetGateway
-
-  # ============================================================
-  # Public Subnet
-  # ============================================================
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet'
-
-  # ============================================================
-  # Private Subnet
-  # ============================================================
-  PrivateSubnet:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref MyVPC
-      CidrBlock: 10.0.10.0/24
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet'
-
-
-
-  # ============================================================
-  # Public Route Table
-  # ============================================================
-  PublicRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref MyVPC
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicRTable'
-
-  PublicRoute:
-    Type: AWS::EC2::Route
-    DependsOn: AttachGateway
-    Properties:
-      RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref InternetGateway
-
-  PublicSubnetRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet
-      RouteTableId: !Ref PublicRouteTable
-
-  # ============================================================
-  # Private Route Table
-  # ============================================================
-  PrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    Properties:
-      VpcId: !Ref MyVPC
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateRTable'
-
-
-  PrivateSubnetRouteTableAssociation:
-     Type: AWS::EC2::SubnetRouteTableAssociation
-     Properties:
-       SubnetId: !Ref PrivateSubnet
-       RouteTableId: !Ref PrivateRouteTable
-
    # ============================================================
-   # Security Group for EC2
+   # S3 Bucket
    # ============================================================
-  EC2SecurityGroup:
-     Type: AWS::EC2::SecurityGroup
-     Properties:
-       GroupDescription: Security group for EC2 instance
-       VpcId: !Ref MyVPC
-       SecurityGroupIngress:
-         - IpProtocol: tcp
-           FromPort: 80
-           ToPort: 80
-           CidrIp: 0.0.0.0/0
-           Description: HTTP access
-         - IpProtocol: tcp
-           FromPort: 8080
-           ToPort: 8080
-           CidrIp: 0.0.0.0/0
-           Description: Custom App Port
-       SecurityGroupEgress:
-         - IpProtocol: -1
-           CidrIp: 0.0.0.0/0
+  TestBucketForReport:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateBucket
+    Properties:
+       BucketName: skmehtausatestbucketforreport-73483638381
+       VersioningConfiguration:
+         Status: Enabled
+       PublicAccessBlockConfiguration:
+         BlockPublicAcls: true
+         BlockPublicPolicy: true
+         IgnorePublicAcls: true
+         RestrictPublicBuckets: true
        Tags:
          - Key: Name
-           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG'
-
+           Value: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-TestBucket'
+         - Key: Environment
+           Value: !Ref EnvironmentName
+         - Key: Service
+           Value: !Ref ServiceName
 
 Outputs:
-  VPCId:
-    Description: VPC ID
-    Value: !Ref MyVPC
+  S3BucketNameNew:
+    Description: S3 Bucket Name
+    Value: !If
+      - ShouldCreateBucket
+      - !Ref TestBucketForReport
+      - 'skmehtausatestbucketforreport-73483638381'  # Hardcoded bucket name when not creating
     Export:
-      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-VPC-ID'
-
-  PublicSubnetId:
-    Description: Public Subnet ID
-    Value: !Ref PublicSubnet
-    Export:
-      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PublicSubnet-ID'
-
-  PrivateSubnetId:
-    Description: Private Subnet ID
-    Value: !Ref PrivateSubnet
-    Export:
-      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-PrivateSubnet-ID'
-
-
-  EC2SecurityGroupId:
-    Description: EC2 Security Group ID
-    Value: !Ref EC2SecurityGroup
-    Export:
-      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-EC2-SG-ID'
-
-
+      Name: !Sub '${EnvironmentName}-${ServiceName}-${EnvIdentifier}-S3Bucket-Name-New'
+    Condition: ShouldCreateBucket
 

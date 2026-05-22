@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: SAM template for global name tracking API (Python + DynamoDB)
+
+Resources:
+  # The Serverless NoSQL Database Table
+  UserTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+
+  # The Serverless Python Lambda Execution Logic
+  NameTrackerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      CodeUri: s3://generalusebucket-734836383818-us-east-1-an/app.zip
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UserTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+      Events:
+        RootApi:
+          Type: Api
+          Properties:
+            Path: /
+            Method: get
+        GetNameApi:
+          Type: Api
+          Properties:
+            Path: /name/{id}
+            Method: get
+        SetNameApi:
+          Type: Api
+          Properties:
+            Path: /name
+            Method: post
+
+
+  # The SAM Connector to automatically give Lambda read/write rights to DynamoDB
+  TableConnection:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: NameTrackerFunction
+      Destination:
+        Id: UserTable
+      Permissions:
+        - Read
+        - Write
+
+Outputs:
+  ApiUrl:
+    Description: "Public API URL Endpoint"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  LambdaFunctionArn:
+    Description: "Lambda Function ARN"
+    Value: !GetAtt NameTrackerFunction.Arn
+  DynamoDBTableName:
+    Description: "DynamoDB Table Name"
+    Value: !Ref UserTable

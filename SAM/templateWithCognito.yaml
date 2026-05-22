@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Secured SAM template with Cognito authentication on POST method
+
+Resources:
+  # 1. COGNITO USER POOL (The User Directory)
+  MyUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: NameApiUserPool
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+
+  # 2. COGNITO USER POOL CLIENT (Allows apps/postman to talk to Cognito)
+  MyUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: NameApiClient
+      UserPoolId: !Ref MyUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # 3. CUSTOM API GATEWAY WITH EMBEDDED COGNITO AUTHORIZER
+  MyAuthApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        DefaultAuthorizer: NONE # Keep GET public by default
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt MyUserPool.Arn
+            IdentitySource: method.request.header.Authorization
+
+  # 4. DATABASE LAYER
+  UserTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+
+  # 5. COMPUTE LAYER
+  NameTrackerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      CodeUri: s3://YOUR-BUCKET-NAME/app.zip # <--- Replace with your S3 bucket path!
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UserTable
+      Events:
+        # GET is fully public
+        GetNameApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyAuthApi
+            Path: /name
+            Method: get
+        # POST is locked down behind the Cognito Authorizer
+        SetNameApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyAuthApi
+            Path: /name
+            Method: post
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  TableConnection:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Type: AWS::Serverless::Function
+        Arn: !GetAtt NameTrackerFunction.Arn
+      Destination:
+        Type: AWS::Serverless::SimpleTable
+        Arn: !GetAtt UserTable.Arn
+      Permissions:
+        - Read
+        - Write
+
+Outputs:
+  ApiUrl:
+    Description: "Public API URL Endpoint"
+    Value: !Sub "https://${MyAuthApi}.execute-api.${AWS::Region}://"
+  UserPoolId:
+    Description: "The ID of your Cognito User Pool"
+    Value: !Ref MyUserPool
+  UserPoolClientId:
+    Description: "The App Client ID to log users in"
+    Value: !Ref MyUserPoolClient
