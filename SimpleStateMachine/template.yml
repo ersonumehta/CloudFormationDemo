@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: State machine that routes by userType and reports Lambda result (Python Lambdas)
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 10
+    MemorySize: 128
+    Tracing: Active
+
+Resources:
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://generalusebucket-734836383818-us-east-1-an/admin.zip
+      Handler: app.lambda_handler
+      Description: Logs Admin user details and returns true
+
+  NormalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://generalusebucket-734836383818-us-east-1-an/normal.zip
+      Handler: app.lambda_handler
+      Description: Logs Normal user details and returns false
+
+  LoggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://generalusebucket-734836383818-us-east-1-an/logger.zip
+      Handler: app.lambda_handler
+      Description: Logs the returned boolean value from previous task and returns it unchanged
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+  UserTypeRouterStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: UserTypeRouterStateMachine
+      Definition:
+        Comment: Routes by userType, invokes corresponding Lambda, logs, then reports the return value
+        StartAt: RouteByUserType
+        States:
+          RouteByUserType:
+            Type: Choice
+            Choices:
+              - Variable: $.userType
+                StringEquals: Admin
+                Next: AdminTask
+              - Variable: $.userType
+                StringEquals: Normal
+                Next: NormalTask
+            Default: InvalidUserType
+          AdminTask:
+            Type: Task
+            Resource: !GetAtt AdminFunction.Arn
+            ResultPath: $.lambdaResult
+            Next: LoggerTask
+          NormalTask:
+            Type: Task
+            Resource: !GetAtt NormalFunction.Arn
+            ResultPath: $.lambdaResult
+            Next: LoggerTask
+          LoggerTask:
+            Type: Task
+            Resource: !GetAtt LoggerFunction.Arn
+            Parameters:
+              "lambdaResult.$": "$.lambdaResult"
+            ResultPath: $.lambdaResult
+            Next: ReportResult
+          ReportResult:
+            Type: Pass
+            Parameters:
+              "message.$": "States.Format('Lambda returned: {}', $.lambdaResult)"
+              "returnedValue.$": "$.lambdaResult"
+            ResultPath: $.report
+            OutputPath: $.report
+            End: true
+          InvalidUserType:
+            Type: Fail
+            Error: InvalidUserType
+            Cause: "userType must be 'Admin' or 'Normal'"
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AdminFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref NormalFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref LoggerFunction
+        - Statement:
+            - Sid: StepFunctionsCWLogsDelivery
+              Effect: Allow
+              Action:
+                - logs:CreateLogDelivery
+                - logs:GetLogDelivery
+                - logs:UpdateLogDelivery
+                - logs:DeleteLogDelivery
+                - logs:ListLogDeliveries
+                - logs:DescribeLogGroups
+                - logs:DescribeResourcePolicies
+                - logs:PutResourcePolicy
+              Resource: "*"
+      Tracing:
+        Enabled: true
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the Step Functions state machine
+    Value: !Ref UserTypeRouterStateMachine
+  AdminFunctionArn:
+    Description: ARN of the Admin Lambda function
+    Value: !GetAtt AdminFunction.Arn
+  NormalFunctionArn:
+    Description: ARN of the Normal Lambda function
+    Value: !GetAtt NormalFunction.Arn
+  LoggerFunctionArn:
+    Description: ARN of the Logger Lambda function
+    Value: !GetAtt LoggerFunction.Arn
