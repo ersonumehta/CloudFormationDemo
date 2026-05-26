@@ -39,50 +39,33 @@ Resources:
   UserTypeRouterStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
-      Name: UserTypeRouterStateMachine
+      Name: !Sub "${AWS::StackName}-UserTypeRouterStateMachine"
       Definition:
-        Comment: Routes by userType, invokes corresponding Lambda, logs, then reports the return value
-        StartAt: RouteByUserType
+        Comment: Runs Admin and Normal Lambdas in parallel, then logs both results and ends
+        StartAt: RunBoth
         States:
-          RouteByUserType:
-            Type: Choice
-            Choices:
-              - Variable: $.userType
-                StringEquals: Admin
-                Next: AdminTask
-              - Variable: $.userType
-                StringEquals: Normal
-                Next: NormalTask
-            Default: InvalidUserType
-          AdminTask:
-            Type: Task
-            Resource: !GetAtt AdminFunction.Arn
-            ResultPath: $.lambdaResult
-            Next: LoggerTask
-          NormalTask:
-            Type: Task
-            Resource: !GetAtt NormalFunction.Arn
-            ResultPath: $.lambdaResult
+          RunBoth:
+            Type: Parallel
+            Branches:
+              - StartAt: AdminTask
+                States:
+                  AdminTask:
+                    Type: Task
+                    Resource: !GetAtt AdminFunction.Arn
+                    End: true
+              - StartAt: NormalTask
+                States:
+                  NormalTask:
+                    Type: Task
+                    Resource: !GetAtt NormalFunction.Arn
+                    End: true
             Next: LoggerTask
           LoggerTask:
             Type: Task
             Resource: !GetAtt LoggerFunction.Arn
             Parameters:
-              "lambdaResult.$": "$.lambdaResult"
-            ResultPath: $.lambdaResult
-            Next: ReportResult
-          ReportResult:
-            Type: Pass
-            Parameters:
-              "message.$": "States.Format('Lambda returned: {}', $.lambdaResult)"
-              "returnedValue.$": "$.lambdaResult"
-            ResultPath: $.report
-            OutputPath: $.report
+              "results.$": "$"
             End: true
-          InvalidUserType:
-            Type: Fail
-            Error: InvalidUserType
-            Cause: "userType must be 'Admin' or 'Normal'"
       Logging:
         Destinations:
           - CloudWatchLogsLogGroup:
