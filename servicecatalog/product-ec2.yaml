@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Service Catalog product: EC2 instance with Apache listening on port 8080"
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "VPC Id where instance will be launched"
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: "Subnet Id where instance will be launched (should be public subnet)"
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Optional EC2 KeyPair for SSH access"
+    Default: ""
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: "EC2 Instance Type"
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: "SSM parameter for the Amazon Linux 2 AMI to use"
+Conditions:
+  HasKeyName:
+    Fn::Not:
+      - Fn::Equals: [ !Ref KeyName, "" ]
+Resources:
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allow SSH and HTTP(8080) access"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-sg"
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      ImageId: !Ref AmiId
+      KeyName: !If [ HasKeyName, !Ref KeyName, !Ref "AWS::NoValue" ]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install -y httpd
+          # Configure httpd to listen on 8080
+          if grep -q "^Listen 80" /etc/httpd/conf/httpd.conf; then
+            sed -i 's/^Listen 80/Listen 8080/' /etc/httpd/conf/httpd.conf
+          else
+            echo "Listen 8080" >> /etc/httpd/conf/httpd.conf
+          fi
+          cat > /var/www/html/index.html <<'EOF'
+          <html>
+            <head><title>Apache Default Page</title></head>
+            <body>
+              <h1>Apache on ${AWS::StackName}</h1>
+              <p>Instance: $(hostname -f)</p>
+            </body>
+          </html>
+          EOF
+          systemctl enable httpd
+          systemctl start httpd
+Outputs:
+  InstanceId:
+    Description: "EC2 Instance Id"
+    Value: !Ref WebServerInstance
+  SecurityGroupId:
+    Description: "Security Group Id"
+    Value: !Ref InstanceSecurityGroup
+

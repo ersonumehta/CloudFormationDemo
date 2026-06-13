@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Service Catalog portfolio only"
+Parameters:
+  PortfolioName:
+    Type: String
+    Default: "ExamplePortfolio"
+  PortfolioProvider:
+    Type: String
+    Default: "Admin"
+  AdminPrincipalArn:
+    Type: String
+    Default: ""
+    Description: "Optional IAM principal ARN (user or role) to associate as portfolio admin"
+Conditions:
+  HasAdmin:
+    Fn::Not:
+      - Fn::Equals: [ !Ref AdminPrincipalArn, "" ]
+Resources:
+  ExamplePortfolio:
+    Type: AWS::ServiceCatalog::Portfolio
+    Properties:
+      DisplayName: !Ref PortfolioName
+      ProviderName: !Ref PortfolioProvider
+      Description: "Example Service Catalog portfolio containing S3, VPC, and EC2 products"
+  PortfolioAdminAssociation:
+    Type: AWS::ServiceCatalog::PortfolioPrincipalAssociation
+    Condition: HasAdmin
+    Properties:
+      PortfolioId: !Ref ExamplePortfolio
+      PrincipalARN: !Ref AdminPrincipalArn
+      PrincipalType: "IAM"
+Outputs:
+  PortfolioId:
+    Value: !Ref ExamplePortfolio
+    Description: "Portfolio Id"
+  PortfolioArn:
+    Value: !GetAtt ExamplePortfolio.Arn
+    Description: "Portfolio ARN"
+

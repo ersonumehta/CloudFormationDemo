@@ -1,0 +1,35 @@
+  AWSTemplateFormatVersion: '2010-09-09'
+Description: "Service Catalog product: S3 bucket"
+Parameters:
+  BucketName:
+    Type: String
+    Description: Optional bucket name. Leave blank to let CloudFormation generate a name.
+    Default: ""
+  EnableVersioning:
+    Type: String
+    AllowedValues: ["true","false"]
+    Default: "false"
+    Description: Enable versioning for the bucket
+Conditions:
+  HasName:
+    Fn::Not:
+      - Fn::Equals: [ !Ref BucketName, "" ]
+  EnableVersioningCondition:
+    Fn::Equals: [ !Ref EnableVersioning, "true" ]
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # Only set BucketName if provided
+      BucketName: !If [ HasName, !Ref BucketName, !Ref "AWS::NoValue" ]
+      # Versioning only when enabled
+      VersioningConfiguration: !If [ EnableVersioningCondition, { Status: "Enabled" }, !Ref "AWS::NoValue" ]
+Outputs:
+  BucketName:
+    Description: "S3 bucket name"
+    Value: !Ref S3Bucket
+  BucketArn:
+    Description: "S3 bucket ARN"
+    Value: !GetAtt S3Bucket.Arn
+
+

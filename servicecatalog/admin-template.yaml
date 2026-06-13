@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Admin template to create Service Catalog Portfolio and register 3 products (S3, VPC, EC2). Provide S3 URLs to product templates."
+Parameters:
+  PortfolioName:
+    Type: String
+    Default: "ExamplePortfolio"
+  PortfolioProvider:
+    Type: String
+    Default: "Admin"
+  AdminPrincipalArn:
+    Type: String
+    Default: ""
+    Description: "IAM principal (user or role ARN) to make admin of the portfolio"
+  S3ProductTemplateURL:
+    Type: String
+    Default: "https://generalusebucket-734836383818-us-east-1-an.s3.us-east-1.amazonaws.com/catalog/product-s3.yaml"
+    Description: "S3 URL for product-s3.yaml (e.g., https://s3.amazonaws.com/mybucket/product-s3.yaml)"
+  VpcProductTemplateURL:
+    Type: String
+    Default: "https://generalusebucket-734836383818-us-east-1-an.s3.us-east-1.amazonaws.com/catalog/product-vpc.yaml"
+    Description: "S3 URL for product-vpc.yaml"
+  Ec2ProductTemplateURL:
+    Type: String
+    Default: "https://generalusebucket-734836383818-us-east-1-an.s3.us-east-1.amazonaws.com/catalog/product-ec2.yaml"
+    Description: "S3 URL for product-ec2.yaml"
+Conditions:
+  HasAdmin:
+    Fn::Not:
+      - Fn::Equals: [ !Ref AdminPrincipalArn, "" ]
+Resources:
+  Portfolio:
+    Type: AWS::ServiceCatalog::Portfolio
+    Properties:
+      DisplayName: !Ref PortfolioName
+      ProviderName: !Ref PortfolioProvider
+      Description: "Portfolio containing example S3, VPC and EC2 products"
+  S3Product:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      Name: "S3-Bucket-Product"
+      Owner: !Ref PortfolioProvider
+      Description: "Creates an S3 bucket"
+      ProvisioningArtifactParameters:
+        - Name: "v1"
+          Description: "Initial artifact"
+          Info:
+            LoadTemplateFromURL: !Ref S3ProductTemplateURL
+          Type: "CLOUD_FORMATION_TEMPLATE"
+  VpcProduct:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      Name: "VPC-Public-Product"
+      Owner: !Ref PortfolioProvider
+      Description: "Creates a VPC with Internet Gateway and a public subnet"
+      ProvisioningArtifactParameters:
+        - Name: "v1"
+          Description: "Initial artifact"
+          Info:
+            LoadTemplateFromURL: !Ref VpcProductTemplateURL
+          Type: "CLOUD_FORMATION_TEMPLATE"
+  Ec2Product:
+    Type: AWS::ServiceCatalog::CloudFormationProduct
+    Properties:
+      Name: "EC2-Apache-Product"
+      Owner: !Ref PortfolioProvider
+      Description: "Creates an EC2 instance and installs Apache listening on port 8080"
+      ProvisioningArtifactParameters:
+        - Name: "v1"
+          Description: "Initial artifact"
+          Info:
+            LoadTemplateFromURL: !Ref Ec2ProductTemplateURL
+          Type: "CLOUD_FORMATION_TEMPLATE"
+  S3PortfolioProductAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      PortfolioId: !Ref Portfolio
+      ProductId: !Ref S3Product
+  VpcPortfolioProductAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      PortfolioId: !Ref Portfolio
+      ProductId: !Ref VpcProduct
+  Ec2PortfolioProductAssociation:
+    Type: AWS::ServiceCatalog::PortfolioProductAssociation
+    Properties:
+      PortfolioId: !Ref Portfolio
+      ProductId: !Ref Ec2Product
+  PortfolioAdminAssociation:
+    Type: AWS::ServiceCatalog::PortfolioPrincipalAssociation
+    Condition: HasAdmin
+    Properties:
+      PortfolioId: !Ref Portfolio
+      PrincipalARN: !Ref AdminPrincipalArn
+      PrincipalType: "IAM"
+Outputs:
+  PortfolioId:
+    Value: !Ref Portfolio
+    Description: "Portfolio Id"
+  S3ProductId:
+    Value: !Ref S3Product
+    Description: "S3 Product Id"
+  VpcProductId:
+    Value: !Ref VpcProduct
+    Description: "VPC Product Id"
+  Ec2ProductId:
+    Value: !Ref Ec2Product
+    Description: "EC2 Product Id"
+
